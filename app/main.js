@@ -33,6 +33,8 @@ const DEFAULTS = {
   rampMax: 20, // ramp: the gap stops growing here, then stays
   position: "bottom-right", // bottom-right|bottom-left|top-right|top-left|bottom-center|center
   pauseOnMedia: true, // don't fire while the camera or mic is in use (calls)
+  avatar: "random", // "random" rotates the roster; or one of AVATARS to pin a character
+  voice: "all", // "all" plays every bank; or a subfolder name under audio/ to pin a voice
   visitCount: 0,
 };
 let settings = { ...DEFAULTS };
@@ -157,13 +159,43 @@ function chromeURL(cb) {
   );
 }
 
+// Voice banks are subfolders of audio/ (audio/<voice>/*.opus); top-level *.opus
+// files count as the "default" bank. Track ids are paths relative to AUDIO_DIR.
+function voiceBanks() {
+  const banks = [];
+  try {
+    for (const e of fs.readdirSync(AUDIO_DIR, { withFileTypes: true })) {
+      if (e.isDirectory() && tracksFor(e.name).length) banks.push(e.name);
+      else if (e.isFile() && e.name.endsWith(".opus") && !banks.includes("default")) banks.push("default");
+    }
+  } catch (_) {}
+  return banks.sort();
+}
+function tracksFor(voice) {
+  const list = [];
+  try {
+    if (voice === "default") {
+      for (const f of fs.readdirSync(AUDIO_DIR)) if (f.endsWith(".opus")) list.push(f);
+    } else if (voice && voice !== "all") {
+      for (const f of fs.readdirSync(path.join(AUDIO_DIR, voice)))
+        if (f.endsWith(".opus")) list.push(path.join(voice, f));
+    } else {
+      for (const e of fs.readdirSync(AUDIO_DIR, { withFileTypes: true })) {
+        if (e.isFile() && e.name.endsWith(".opus")) list.push(e.name);
+        else if (e.isDirectory())
+          for (const f of fs.readdirSync(path.join(AUDIO_DIR, e.name)))
+            if (f.endsWith(".opus")) list.push(path.join(e.name, f));
+      }
+    }
+  } catch (_) {}
+  return list;
+}
+
 function fire(trackName) {
   if (isPlaying || !overlay || settings.paused) return;
   if (settings.pauseOnMedia && mediaActive) return; // don't disrupt a call
-  let tracks = [];
-  try {
-    tracks = fs.readdirSync(AUDIO_DIR).filter((f) => f.endsWith(".opus"));
-  } catch (_) {}
+  let tracks = tracksFor(settings.voice);
+  if (!tracks.length && settings.voice !== "all") tracks = tracksFor("all"); // stale bank pick
   if (!tracks.length) return; // tray tooltip points the user at prep/convert_clips.sh
   isPlaying = true;
   lastFire = Date.now();
@@ -181,10 +213,15 @@ function fire(trackName) {
   }
   recent.push(pick);
   if (recent.length > NO_REPEAT * 2) recent = recent.slice(-NO_REPEAT * 2);
-  // avatar: random from the 5-character roster, never the same twice in a row
-  let avatars = AVATARS.filter((a) => a !== lastAvatar);
-  if (!avatars.length) avatars = AVATARS;
-  const avatar = avatars[Math.floor(Math.random() * avatars.length)];
+  // avatar: pinned via settings, or random from the roster (never twice in a row)
+  let avatar;
+  if (AVATARS.includes(settings.avatar)) {
+    avatar = settings.avatar;
+  } else {
+    let avatars = AVATARS.filter((a) => a !== lastAvatar);
+    if (!avatars.length) avatars = AVATARS;
+    avatar = avatars[Math.floor(Math.random() * avatars.length)];
+  }
   lastAvatar = avatar;
   console.log(`fire: ${pick} as ${avatar}`); // lands in agent.log via launchd
   const src = "file://" + path.join(AUDIO_DIR, pick);
@@ -293,7 +330,7 @@ function openDashboard() {
   }
   dash = new BrowserWindow({
     width: 340,
-    height: 780,
+    height: 856,
     resizable: false,
     fullscreenable: false,
     title: "Reality Check Avatars",
@@ -324,6 +361,7 @@ ipcMain.on("reset-count", () => {
   updateTray();
 });
 ipcMain.on("preview", () => fire());
+ipcMain.on("get-voices", (e) => e.reply("voices", voiceBanks()));
 
 // ---------- tray (menu bar) ----------
 function trayImage() {
@@ -354,11 +392,7 @@ function updateTray() {
   ]);
   tray.setContextMenu(menu);
   let tip = settings.paused ? "Reality Check Avatars (paused)" : "Reality Check Avatars";
-  try {
-    if (!fs.readdirSync(AUDIO_DIR).some((f) => f.endsWith(".opus"))) {
-      tip = "Reality Check Avatars — no audio yet: run prep/convert_clips.sh";
-    }
-  } catch (_) {
+  if (!tracksFor("all").length) {
     tip = "Reality Check Avatars — no audio yet: run prep/convert_clips.sh";
   }
   tray.setToolTip(tip);

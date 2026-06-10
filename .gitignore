@@ -9,9 +9,10 @@ app/sensors/mediastate
 app/sensors/*.dSYM
 
 # personal media — NEVER committed (derivative content stays local)
-audio/local-*
+audio/
 cache/
 prep/reference.*
+prep/voices/
 lines/local-*
 
 # runtime

@@ -112,6 +112,21 @@
   </div>
   <div class="hint" id="rampHint" style="margin:6px 0 0;"></div>
   <div class="row">
+    <label>Avatar</label>
+    <select id="avatar">
+      <option value="random">Random (rotate all)</option>
+      <option value="iron">Iron</option>
+      <option value="hustle">Hustle</option>
+      <option value="disciple">Disciple</option>
+      <option value="topg">Top G</option>
+      <option value="coach">Coach</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Voice</label>
+    <select id="voice"><option value="all">All voices</option></select>
+  </div>
+  <div class="row">
     <label>Position</label>
     <select id="position">
       <option value="bottom-right">Bottom right</option>
@@ -151,6 +166,13 @@
         ? `Gaps: ${seq.join(", ")}... then every ${m} min`
         : `Every ${m} min`;
       $("position").value = s.position || "bottom-right";
+      $("avatar").value = s.avatar || "random";
+      const v = $("voice");
+      if (![...v.options].some((o) => o.value === (s.voice || "all"))) {
+        const o = document.createElement("option");
+        o.value = s.voice; o.textContent = s.voice; v.appendChild(o);
+      }
+      v.value = s.voice || "all";
       const PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
       const PAUSE = '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
       const p = $("pause");
@@ -161,7 +183,19 @@
     function set(patch) { ipcRenderer.send("set-settings", patch); }
 
     ipcRenderer.on("settings", (_e, next) => { s = next; render(); });
+    ipcRenderer.on("voices", (_e, banks) => {
+      const v = $("voice");
+      const keep = v.value;
+      v.innerHTML = '<option value="all">All voices</option>';
+      for (const b of banks) {
+        const o = document.createElement("option");
+        o.value = b; o.textContent = b.charAt(0).toUpperCase() + b.slice(1);
+        v.appendChild(o);
+      }
+      v.value = [...v.options].some((o) => o.value === keep) ? keep : (s.voice || "all");
+    });
     ipcRenderer.send("get-settings");
+    ipcRenderer.send("get-voices");
 
     $("pause").onclick = () => set({ paused: !s.paused });
     $("preview").onclick = () => ipcRenderer.send("preview");
@@ -176,6 +210,8 @@
     $("rampAdd").onchange = (e) => set({ rampAdd: num(e.target, 1) });
     $("rampMax").onchange = (e) => set({ rampMax: num(e.target, 20) });
     $("position").onchange = (e) => set({ position: e.target.value });
+    $("avatar").onchange = (e) => set({ avatar: e.target.value });
+    $("voice").onchange = (e) => set({ voice: e.target.value });
   </script>
 </body>
 </html>

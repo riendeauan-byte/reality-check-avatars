@@ -46,8 +46,14 @@ To run once in the foreground for testing: `./start.sh` (or `RC_TEST=1 ./start.s
 ## Make audio
 
 ```
-./prep/convert_clips.sh /path/to/your/clips
+./prep/convert_clips.sh /path/to/your/clips [voice-name]
 ```
+
+Each voice gets its own bank at `audio/<voice-name>/` (default bank: `default`), and
+banks show up in the dashboard's Voice dropdown. The reference sample for a voice is
+looked up at `prep/voices/<voice-name>.wav` (fallback `prep/reference.wav`) — so a
+second voice is just: drop `prep/voices/gravel.wav`, run
+`./prep/convert_clips.sh ~/clips gravel`, pick Gravel in the dashboard.
 
 For every clip in the folder, the script extracts the speech, converts the voice to a reference speaker's tone with [seed-vc](https://github.com/Plachtaa/seed-vc) (zero-shot voice conversion, runs entirely on your machine), applies an authority chain (EQ, broadcast compression, loudness normalization), and writes `audio/local-<name>.opus`.
 
@@ -59,7 +65,7 @@ Personal use note: converted audio re-speaks your source clips' words in a new v
 
 ## Dashboard
 
-Click the eye icon in the menu bar to open the dashboard (or pick Settings from its menu). From there you can pause/resume, play one now, toggle the social-site trigger, toggle "pause during camera or mic use", pick fixed or ramp timer mode and its knobs, choose the position (corners, bottom-center, center, or random corners), and see/reset the social-visit counter. Settings persist across restarts.
+Click the eye icon in the menu bar to open the dashboard (or pick Settings from its menu). From there you can pause/resume, play one now, toggle the social-site trigger, toggle "pause during camera or mic use", pick fixed or ramp timer mode and its knobs, **pin an avatar** (or rotate all five), **pick a voice bank** (or play all), choose the position (corners, bottom-center, center, or random corners), and see/reset the social-visit counter. Settings persist across restarts.
 
 ## How it works
 

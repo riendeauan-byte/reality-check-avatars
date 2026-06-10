@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # Re-voice a folder of clips into the app's audio pool — entirely on your machine.
 #
-#   ./prep/convert_clips.sh <clips-dir> [reference.wav]
+#   ./prep/convert_clips.sh <clips-dir> [voice-name] [reference.wav]
+#
+# Output lands in audio/<voice-name>/ — each voice gets its own bank, selectable
+# in the dashboard's Voice dropdown. Default voice-name: "default". The reference
+# sample is looked up at prep/voices/<voice-name>.wav, falling back to
+# prep/reference.wav, unless given explicitly as the third argument.
 #
 # For each video/audio file in <clips-dir>: extract speech, convert the voice
 # to the reference speaker's tone (seed-vc, zero-shot), apply the authority
@@ -20,7 +25,9 @@ set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLIPS="${1:-}"
-REF="${2:-$ROOT/prep/reference.wav}"
+VOICE="${2:-${VOICE_NAME:-default}}"
+REF="${3:-$ROOT/prep/voices/$VOICE.wav}"
+[ -f "$REF" ] || REF="$ROOT/prep/reference.wav"
 SV="${SEEDVC_DIR:-$ROOT/prep/seed-vc}"
 SEEDVC_REV="${SEEDVC_REV:-51383efd921027683c89e5348211d93ff12ac2a8}"
 WORK="${TMPDIR:-/tmp}/rc-avatars-convert"
@@ -35,8 +42,8 @@ command -v ffmpeg >/dev/null || die "ffmpeg missing — brew install ffmpeg"
 
 # Containment guard: the gitignore rule for derivative output must be alive
 # BEFORE anything is written. Safety never rests on an untested config line.
-( cd "$ROOT" && git check-ignore -q "audio/local-probe.opus" ) \
-  || die "audio/local-* is not gitignored — refusing to write derivative audio"
+( cd "$ROOT" && git check-ignore -q "audio/$VOICE/probe.opus" ) \
+  || die "audio/ is not gitignored — refusing to write derivative audio"
 
 # Bootstrap seed-vc + env (one time). Uses uv if available, else python3.10/3.11.
 if [ ! -d "$SV" ]; then
@@ -70,7 +77,8 @@ EOF
     || die "env build failed"
 fi
 
-mkdir -p "$WORK/src" "$WORK/vc" "$ROOT/audio"
+mkdir -p "$WORK/src" "$WORK/vc" "$ROOT/audio/$VOICE"
+echo "voice bank: $VOICE  (reference: $REF)"
 REFW="$WORK/reference.wav"
 ffmpeg -y -v error -i "$REF" -ac 1 -ar 44100 "$REFW" || die "could not read reference audio"
 
@@ -94,7 +102,7 @@ ok=0; skip=0
 shopt -s nullglob
 for f in "$CLIPS"/*.webm "$CLIPS"/*.mp4 "$CLIPS"/*.mov "$CLIPS"/*.m4a "$CLIPS"/*.mp3 "$CLIPS"/*.wav; do
   name=$(basename "$f"); name="${name%.*}"
-  out="$ROOT/audio/local-$name.opus"
+  out="$ROOT/audio/$VOICE/$name.opus"
   [ -f "$out" ] && { echo "have  $name"; ok=$((ok+1)); continue; }
   ffmpeg -y -v error -i "$f" -vn -ac 1 -ar 44100 "$WORK/src/src-$name.wav" \
     || { echo "skip  $name (extract failed)"; skip=$((skip+1)); continue; }
@@ -109,7 +117,7 @@ for f in "$CLIPS"/*.webm "$CLIPS"/*.mp4 "$CLIPS"/*.mov "$CLIPS"/*.m4a "$CLIPS"/*
 done
 
 echo "----------------------------------------"
-echo "done: $ok ok, $skip skipped -> $ROOT/audio/"
+echo "done: $ok ok, $skip skipped -> $ROOT/audio/$VOICE/"
 if [ "$ok" -eq 0 ]; then
   echo "########################################"
   echo "# NO AUDIO WAS PRODUCED — the app will #"
