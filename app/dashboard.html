@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font: 13px -apple-system, system-ui, sans-serif;
+    background: #161616;
+    color: #eee;
+    padding: 16px;
+    -webkit-user-select: none;
+  }
+  h1 { font-size: 15px; margin: 0 0 2px; }
+  .sub { color: #888; font-size: 11px; margin-bottom: 14px; }
+
+  .count {
+    text-align: center;
+    background: #1f1f1f;
+    border: 1px solid #2c2c2c;
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 14px;
+  }
+  .count b { display: block; font-size: 30px; line-height: 1.1; }
+  .count span { color: #888; font-size: 11px; }
+  .count a { color: #6aa6ff; font-size: 11px; text-decoration: none; cursor: pointer; }
+
+  .row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 0; border-top: 1px solid #242424; gap: 10px;
+  }
+  .row label { color: #ddd; }
+  select, input[type="number"] {
+    background: #222; color: #eee; border: 1px solid #333;
+    border-radius: 7px; padding: 5px 7px; font: inherit;
+  }
+  input[type="number"] { width: 64px; text-align: right; }
+
+  button { border: 0; cursor: pointer; font: 600 13px -apple-system, system-ui, sans-serif; }
+  #preview { width: 100%; padding: 10px; border-radius: 9px; background: #2a2a2a; color: #ddd; }
+  .toggle-wrap { display: flex; justify-content: center; margin: 6px 0 6px; }
+  #pause {
+    width: 92px; height: 92px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: #2e9b4f; box-shadow: 0 4px 16px rgba(0, 0, 0, .4);
+    transition: transform .12s ease, background .15s ease;
+  }
+  #pause:active { transform: scale(0.94); }
+  #pause.paused { background: #e5533b; }
+  #pause svg { width: 36px; height: 36px; fill: #fff; }
+  .hint { text-align: center; color: #888; font-size: 11px; margin: 4px 0 14px; }
+
+  /* iOS-style switch */
+  .sw { position: relative; display: inline-block; width: 40px; height: 23px; cursor: pointer; }
+  .sw input { opacity: 0; width: 0; height: 0; }
+  .sl { position: absolute; inset: 0; background: #3a3a3a; border-radius: 999px; transition: .15s; }
+  .sl:before { content: ""; position: absolute; height: 17px; width: 17px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .15s; }
+  .sw input:checked + .sl { background: #2e9b4f; }
+  .sw input:checked + .sl:before { transform: translateX(17px); }
+</style>
+</head>
+<body>
+  <h1>Reality Check Avatars</h1>
+  <div class="sub">anti-doomscroll overlay</div>
+
+  <div class="toggle-wrap"><button id="pause" aria-label="pause/resume"></button></div>
+  <div class="hint" id="phint">running</div>
+  <button id="preview">Play a clip now</button>
+
+  <div class="count" style="margin-top:14px;">
+    <b id="count">0</b>
+    <span>social visits &nbsp;·&nbsp; <a id="reset">reset</a></span>
+  </div>
+
+  <div class="row">
+    <label>Show when I open socials</label>
+    <label class="sw"><input type="checkbox" id="onSocials"><span class="sl"></span></label>
+  </div>
+  <div class="row">
+    <label>Pause during camera or mic use</label>
+    <label class="sw"><input type="checkbox" id="pauseOnMedia"><span class="sl"></span></label>
+  </div>
+  <div class="row">
+    <label>Also play on a timer</label>
+    <label class="sw"><input type="checkbox" id="periodicOn"><span class="sl"></span></label>
+  </div>
+  <div class="row">
+    <label>Timer style</label>
+    <select id="pmode">
+      <option value="fixed">Same gap every time</option>
+      <option value="ramp">Ramp up (gap grows)</option>
+    </select>
+  </div>
+  <div class="row" id="freqRow">
+    <label>Timer interval</label>
+    <span><input type="number" id="freq" min="1" max="600" step="1"> min</span>
+  </div>
+  <div class="row" id="rampFirstRow">
+    <label>First clip after</label>
+    <span><input type="number" id="rampFirst" min="1" max="600" step="1"> min</span>
+  </div>
+  <div class="row" id="rampAddRow">
+    <label>Each clip adds</label>
+    <span><input type="number" id="rampAdd" min="1" max="60" step="1"> min</span>
+  </div>
+  <div class="row" id="rampMaxRow">
+    <label>Tops out at every</label>
+    <span><input type="number" id="rampMax" min="1" max="600" step="1"> min</span>
+  </div>
+  <div class="hint" id="rampHint" style="margin:6px 0 0;"></div>
+  <div class="row">
+    <label>Position</label>
+    <select id="position">
+      <option value="bottom-right">Bottom right</option>
+      <option value="bottom-left">Bottom left</option>
+      <option value="bottom-center">Bottom center</option>
+      <option value="top-right">Top right</option>
+      <option value="top-left">Top left</option>
+      <option value="center">Center</option>
+      <option value="random-corners">Random corners</option>
+    </select>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require("electron");
+    const $ = (id) => document.getElementById(id);
+    let s = {};
+
+    function render() {
+      $("count").textContent = s.visitCount ?? 0;
+      $("onSocials").checked = !!s.onSocials;
+      $("pauseOnMedia").checked = s.pauseOnMedia !== false;
+      $("periodicOn").checked = s.periodicOn !== false;
+      const ramp = s.periodicMode === "ramp";
+      $("pmode").value = ramp ? "ramp" : "fixed";
+      $("freqRow").style.display = ramp ? "none" : "";
+      for (const id of ["rampFirstRow", "rampAddRow", "rampMaxRow", "rampHint"])
+        $(id).style.display = ramp ? "" : "none";
+      $("freq").value = s.periodicMinutes ?? 7;
+      $("rampFirst").value = s.rampFirst ?? 1;
+      $("rampAdd").value = s.rampAdd ?? 1;
+      $("rampMax").value = s.rampMax ?? 20;
+      // Preview the gaps the ramp will produce, e.g. "1, 2, 3, 4... then every 20 min"
+      const f = Math.max(1, +s.rampFirst || 1), a = Math.max(1, +s.rampAdd || 1), m = Math.max(1, +s.rampMax || 20);
+      const seq = [];
+      for (let v = f; v < m && seq.length < 4; v += a) seq.push(v);
+      $("rampHint").textContent = seq.length
+        ? `Gaps: ${seq.join(", ")}... then every ${m} min`
+        : `Every ${m} min`;
+      $("position").value = s.position || "bottom-right";
+      const PLAY = '<svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>';
+      const PAUSE = '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>';
+      const p = $("pause");
+      p.classList.toggle("paused", !!s.paused);
+      p.innerHTML = s.paused ? PLAY : PAUSE;
+      $("phint").textContent = s.paused ? "paused" : "running";
+    }
+    function set(patch) { ipcRenderer.send("set-settings", patch); }
+
+    ipcRenderer.on("settings", (_e, next) => { s = next; render(); });
+    ipcRenderer.send("get-settings");
+
+    $("pause").onclick = () => set({ paused: !s.paused });
+    $("preview").onclick = () => ipcRenderer.send("preview");
+    $("reset").onclick = () => ipcRenderer.send("reset-count");
+    $("onSocials").onchange = (e) => set({ onSocials: e.target.checked });
+    $("pauseOnMedia").onchange = (e) => set({ pauseOnMedia: e.target.checked });
+    $("periodicOn").onchange = (e) => set({ periodicOn: e.target.checked });
+    $("pmode").onchange = (e) => set({ periodicMode: e.target.value });
+    const num = (el, fb) => Math.max(1, parseInt(el.value, 10) || fb);
+    $("freq").onchange = (e) => set({ periodicMinutes: num(e.target, 7) });
+    $("rampFirst").onchange = (e) => set({ rampFirst: num(e.target, 1) });
+    $("rampAdd").onchange = (e) => set({ rampAdd: num(e.target, 1) });
+    $("rampMax").onchange = (e) => set({ rampMax: num(e.target, 20) });
+    $("position").onchange = (e) => set({ position: e.target.value });
+  </script>
+</body>
+</html>

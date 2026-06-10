@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<style>
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    overflow: hidden;
+    -webkit-user-select: none;
+  }
+  /* anchor: where on screen */
+  #wrap { position: absolute; }
+  #wrap.bottom-right  { right: 0;  bottom: 0; }
+  #wrap.bottom-left   { left: 0;   bottom: 0; }
+  #wrap.bottom-center { left: 50%; bottom: 0; transform: translateX(-50%); }
+  #wrap.top-right     { right: 0;  top: 0; }
+  #wrap.top-left      { left: 0;   top: 0; }
+  #wrap.center        { left: 50%; top: 50%; transform: translate(-50%, -50%); }
+
+  /* soft vignette behind the figure */
+  #wrap::before {
+    content: "";
+    position: absolute;
+    left: 50%; top: 50%;
+    width: 520px; height: 520px;
+    transform: translate(-50%, -50%);
+    background: radial-gradient(circle, rgba(0,0,0,0.15) 0%, rgba(0,0,0,0) 65%);
+    opacity: 0;
+    transition: opacity 1.2s ease;
+    pointer-events: none;
+  }
+  #wrap.in::before { opacity: 1; }
+
+  /* stage: slide/fade choreography (was the <video> rules before the avatar fork) */
+  #stage {
+    position: relative;
+    width: 300px;
+    opacity: 0;
+    transform: translateY(var(--hide, 120%));
+    transition: transform 2s cubic-bezier(0.22, 1, 0.36, 1), opacity 1.2s ease;
+    will-change: transform, opacity;
+    filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.35));
+  }
+  #wrap.in #stage { opacity: 1; transform: translateY(0); }
+  /* center: no slide, fade + gentle scale instead */
+  #wrap.center #stage { transform: scale(0.94); }
+  #wrap.center.in #stage { transform: scale(1); }
+
+  /* bob layer: rAF-driven motion, kept separate from the slide transform */
+  #bob { will-change: transform; }
+
+  /* the figure: arrival overshoot (1.06 -> 1) on every entrance */
+  #av { display: block; width: 300px; height: 300px; }
+  #wrap.in #av { animation: arrive 0.9s cubic-bezier(0.22, 1, 0.36, 1); }
+  @keyframes arrive { 0% { scale: 1.06; } 100% { scale: 1; } }
+</style>
+</head>
+<body>
+  <div id="wrap" class="bottom-right">
+    <div id="stage">
+      <div id="bob">
+        <img id="av" alt="" />
+      </div>
+      <audio id="a"></audio>
+    </div>
+  </div>
+  <script>
+    const { ipcRenderer } = require("electron");
+    const path = require("path");
+    const wrap = document.getElementById("wrap");
+    const stage = document.getElementById("stage");
+    const bob = document.getElementById("bob");
+    const av = document.getElementById("av");
+    const a = document.getElementById("a");
+
+    const FADE = 0.8;        // seconds: smooth audio fade-IN (no fade-out)
+    const FLOOR = 0.45;      // fade STARTS here (audible), not from silence
+    const HIDE_DELAY = 1300; // ms: visual fade-out budget before hiding the window
+    const CLOSE_MS = 200;    // return-to-rest beat before the slide-out
+
+    // ---------- sprites: 5 characters x 4 frames, preloaded ----------
+    const CHARS = ["iron", "hustle", "disciple", "topg", "coach"];
+    const FRAMES = ["closed", "half", "open", "blink"];
+    const AVATAR_DIR = path.join(__dirname, "avatars");
+    const sprites = {};
+    for (const c of CHARS) {
+      sprites[c] = {};
+      for (const f of FRAMES) {
+        const img = new Image();
+        img.src = "file://" + path.join(AVATAR_DIR, c + "-" + f + ".svg");
+        sprites[c][f] = img;
+      }
+    }
+
+    // ---------- audio graph: ONE source per element, analyser taps PRE-gain ----------
+    let actx = null, gain = null, analyser = null, wired = false;
+    const buf = new Float32Array(1024);
+    function wireAudio() {
+      if (wired) return;
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      const node = actx.createMediaElementSource(a); // createMediaElementSource: once only
+      gain = actx.createGain();
+      analyser = actx.createAnalyser();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.6;
+      node.connect(gain).connect(actx.destination);
+      node.connect(analyser); // passive tap, upstream of the output fade
+      wired = true;
+    }
+    function fadeInAudio() {
+      try {
+        wireAudio();
+        if (actx.state === "suspended") actx.resume();
+        const now = actx.currentTime;
+        gain.gain.cancelScheduledValues(now);
+        gain.gain.setValueAtTime(FLOOR, now); // start audible, ramp up to full
+        gain.gain.exponentialRampToValueAtTime(1.0, now + FADE);
+      } catch (_) {}
+    }
+    function rms() {
+      analyser.getFloatTimeDomainData(buf);
+      let s = 0;
+      for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+      return Math.sqrt(s / buf.length);
+    }
+
+    // ---------- animation: sprite swap driven by speech energy ----------
+    let playing = false, closing = false, char = "coach";
+    let sm = 0, rollMax = 0.1, blinkAt = 0, blinkUntil = 0, raf = 0;
+    function setFrame(f) {
+      const img = sprites[char] && sprites[char][f];
+      if (img && av.src !== img.src) av.src = img.src;
+    }
+    function loop(now) {
+      if (!playing) return; // self-terminates; restarted on each play
+      let level = 0;
+      if (!closing && analyser) {
+        const r = rms();
+        rollMax = Math.max(r, rollMax * 0.995, 0.1);
+        const target = Math.min(1, (r / rollMax) * 1.2);
+        sm += (target - sm) * (target > sm ? 0.5 : 0.2); // fast attack, slower release
+        level = sm;
+      } else {
+        sm *= 0.55; // closing: settle to rest before the slide-out
+        level = sm;
+      }
+      const t = now / 1000;
+      if (now > blinkAt) { blinkUntil = now + 120; blinkAt = now + 2500 + Math.random() * 2500; }
+      let frame = level > 0.55 ? "open" : level > 0.18 ? "half" : "closed";
+      if (now < blinkUntil && frame === "closed") frame = "blink";
+      setFrame(frame);
+      const peak = level > 0.7;
+      const y = Math.sin(t * 2.1) * 1.5 + (peak ? -3 : 0); // breathing + peak emphasis
+      bob.style.transform = "translateY(" + y + "px) rotate(" + (peak ? 1.2 : 0) + "deg)";
+      raf = requestAnimationFrame(loop);
+    }
+    function startLoop() {
+      cancelAnimationFrame(raf);
+      playing = true; closing = false; sm = 0; rollMax = 0.1;
+      blinkAt = performance.now() + 1500;
+      raf = requestAnimationFrame(loop);
+    }
+    function stopLoop() { playing = false; cancelAnimationFrame(raf); }
+
+    // Hard stop: pause playback and kill audio at once (pause = stop now).
+    function stopNow() {
+      try { a.pause(); } catch (_) {}
+      try {
+        if (gain && actx) {
+          const now = actx.currentTime;
+          gain.gain.cancelScheduledValues(now);
+          gain.gain.setValueAtTime(0.0001, now);
+        }
+      } catch (_) {}
+      stopLoop();
+      wrap.classList.remove("in");
+    }
+    ipcRenderer.on("stop", stopNow);
+
+    function finish() {
+      stopLoop();
+      wrap.classList.remove("in");
+      setTimeout(() => ipcRenderer.send("done"), HIDE_DELAY - CLOSE_MS);
+    }
+
+    ipcRenderer.on("play", (_e, { src, position, avatar }) => {
+      const pos = position || "bottom-right";
+      char = CHARS.includes(avatar) ? avatar : "coach"; // unknown key -> default
+      wrap.className = pos;
+      const hide = pos.startsWith("top") ? "-120%" : pos === "center" ? "0%" : "120%";
+      // snap to the hidden start INSTANTLY (no animation) so the slide always
+      // begins from the correct edge (top corners start above the top edge).
+      stage.style.transition = "none";
+      stage.style.setProperty("--hide", hide);
+      wrap.classList.remove("in");
+      setFrame("closed"); // idle pose set BEFORE anything becomes visible
+      void stage.offsetWidth; // force reflow to lock in the hidden state
+      stage.style.transition = "";
+
+      a.src = src;
+      a.muted = false;
+      a.currentTime = 0;
+      a.load();
+      a.oncanplay = () => {
+        a.oncanplay = null;
+        fadeInAudio();
+        requestAnimationFrame(() => requestAnimationFrame(() => wrap.classList.add("in")));
+        a.play().catch(() => {});
+        startLoop();
+      };
+      a.onended = () => {
+        closing = true; // 200ms return-to-rest, then slide out
+        setTimeout(finish, CLOSE_MS);
+      };
+      a.onerror = () => {
+        console.error("overlay: audio failed to load: " + src);
+        stopLoop();
+        wrap.classList.remove("in");
+        ipcRenderer.send("done");
+      };
+    });
+  </script>
+</body>
+</html>

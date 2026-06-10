@@ -1,0 +1,12 @@
+{
+  "name": "reality-check-avatars",
+  "version": "2.0.0",
+  "description": "Anti-doomscroll overlay: open a time-wasting site, a 2D avatar slides into a corner and calls you out.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^42.3.3"
+  }
+}
