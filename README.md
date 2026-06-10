@@ -55,11 +55,17 @@ looked up at `prep/voices/<voice-name>.wav` (fallback `prep/reference.wav`) — 
 second voice is just: drop `prep/voices/gravel.wav`, run
 `./prep/convert_clips.sh ~/clips gravel`, pick Gravel in the dashboard.
 
-For every clip in the folder, the script extracts the speech, converts the voice to a reference speaker's tone with [seed-vc](https://github.com/Plachtaa/seed-vc) (zero-shot voice conversion, runs entirely on your machine), applies an authority chain (EQ, broadcast compression, loudness normalization), and writes `audio/local-<name>.opus`.
+For every clip in the folder, the script isolates the voice from any music bed ([demucs](https://github.com/adefossez/demucs)), converts it to a reference speaker's tone with [seed-vc](https://github.com/Plachtaa/seed-vc)'s f0-conditioned model at 44.1kHz (zero-shot, pitch shifted -2 semitones inside the model, 100 diffusion steps), applies an authority chain (EQ, broadcast compression, loudness normalization), and writes into the bank.
 
-You provide the reference voice: drop a 10 to 30 second sample at `prep/reference.wav`. Deeper, raspier references produce more commanding output.
+You provide the reference voice: drop a 10 to 30 second sample at `prep/voices/<voice-name>.wav` (fallback `prep/reference.wav`). Deeper, raspier references produce more commanding output.
 
-First run bootstraps a Python environment and downloads model checkpoints (about 2.5 GB, one time). After that each clip takes roughly a minute on Apple Silicon.
+First run bootstraps a Python environment and downloads model checkpoints (about 4 GB, one time). After that each clip takes about two minutes on Apple Silicon.
+
+To also keep the untouched real audio as a selectable bank (level-matched only):
+
+```
+./prep/original_bank.sh /path/to/your/clips
+```
 
 Personal use note: converted audio re-speaks your source clips' words in a new voice. It is derivative of that source material, so the pipeline writes it as `audio/local-*` which is gitignored, refuses to run if that ignore rule is missing, and nothing under `audio/` ships with the repo. Keep it local.
 
