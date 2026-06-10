@@ -165,8 +165,14 @@
     }
     function stopLoop() { playing = false; cancelAnimationFrame(raf); }
 
+    // Close-out timers from the previous play; cleared on every new play and
+    // on stop, so a stale "done" can never land mid-way through the next track.
+    let closeT = 0, doneT = 0;
+    function clearCloseTimers() { clearTimeout(closeT); clearTimeout(doneT); }
+
     // Hard stop: pause playback and kill audio at once (pause = stop now).
     function stopNow() {
+      clearCloseTimers();
       try { a.pause(); } catch (_) {}
       try {
         if (gain && actx) {
@@ -183,10 +189,11 @@
     function finish() {
       stopLoop();
       wrap.classList.remove("in");
-      setTimeout(() => ipcRenderer.send("done"), HIDE_DELAY - CLOSE_MS);
+      doneT = setTimeout(() => ipcRenderer.send("done"), HIDE_DELAY - CLOSE_MS);
     }
 
     ipcRenderer.on("play", (_e, { src, position, avatar }) => {
+      clearCloseTimers(); // never let the previous track's close-out fire into this one
       const pos = position || "bottom-right";
       char = CHARS.includes(avatar) ? avatar : "coach"; // unknown key -> default
       wrap.className = pos;
@@ -213,7 +220,7 @@
       };
       a.onended = () => {
         closing = true; // 200ms return-to-rest, then slide out
-        setTimeout(finish, CLOSE_MS);
+        closeT = setTimeout(finish, CLOSE_MS);
       };
       a.onerror = () => {
         console.error("overlay: audio failed to load: " + src);

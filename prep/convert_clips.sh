@@ -22,6 +22,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CLIPS="${1:-}"
 REF="${2:-$ROOT/prep/reference.wav}"
 SV="${SEEDVC_DIR:-$ROOT/prep/seed-vc}"
+SEEDVC_REV="${SEEDVC_REV:-51383efd921027683c89e5348211d93ff12ac2a8}"
 WORK="${TMPDIR:-/tmp}/rc-avatars-convert"
 STEPS="${DIFFUSION_STEPS:-60}"
 CFG="${CFG_RATE:-0.6}"
@@ -40,7 +41,7 @@ command -v ffmpeg >/dev/null || die "ffmpeg missing — brew install ffmpeg"
 # Bootstrap seed-vc + env (one time). Uses uv if available, else python3.10/3.11.
 if [ ! -d "$SV" ]; then
   echo "Cloning seed-vc (one time)..."
-  git clone --depth 1 https://github.com/Plachtaa/seed-vc "$SV" || die "clone failed"
+  git clone https://github.com/Plachtaa/seed-vc "$SV" && git -C "$SV" checkout -q "$SEEDVC_REV" || die "clone failed"
 fi
 if [ ! -x "$SV/venv310/bin/python" ]; then
   echo "Building python env (one time)..."
@@ -78,9 +79,13 @@ post() { # $1 in.wav  $2 out.opus — authority chain + two-pass loudnorm
   ffmpeg -hide_banner -nostats -y -i "$1" -af "$CH,loudnorm=I=-16:TP=-1.5:print_format=json" -f null - 2>&1 \
     | sed -n '/^{/,/^}/p' > "$WORK/ln.json" || return 1
   local ARGS
-  ARGS=$(python3 -c "
-import json; d=json.load(open('$WORK/ln.json'))
-print(f\"measured_I={d['input_i']}:measured_TP={d['input_tp']}:measured_LRA={d['input_lra']}:measured_thresh={d['input_thresh']}\")" 2>/dev/null) || return 1
+  ARGS=$(LN_JSON="$WORK/ln.json" python3 - 2>/dev/null <<'PY'
+import json, os
+d = json.load(open(os.environ["LN_JSON"]))
+print(f"measured_I={d['input_i']}:measured_TP={d['input_tp']}:"
+      f"measured_LRA={d['input_lra']}:measured_thresh={d['input_thresh']}")
+PY
+) || return 1
   ffmpeg -y -v error -i "$1" -af "$CH,loudnorm=I=-16:TP=-1.5:linear=true:$ARGS" \
     -ar 48000 -c:a libopus -b:a 96k "$2"
 }
