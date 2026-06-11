@@ -71,13 +71,14 @@ Personal use note: converted audio re-speaks your source clips' words in a new v
 
 ## Dashboard
 
-Click the eye icon in the menu bar to open the dashboard (or pick Settings from its menu). From there you can pause/resume, play one now, toggle the social-site trigger, toggle "pause during camera or mic use", pick fixed or ramp timer mode and its knobs, **pin an avatar** (or rotate all five), **pick a voice bank** (or play all), choose the position (corners, bottom-center, center, or random corners), and see/reset the social-visit counter. Settings persist across restarts.
+Click the eye icon in the menu bar to open the dashboard (or pick Settings from its menu). From there you can pause/resume, play one now (works even while paused — an explicit click always plays), toggle the social-site trigger, toggle "pause during camera or mic use", pick fixed or ramp timer mode and its knobs, **pin an avatar** (or rotate all five), **pick a voice bank** (or play all), choose the position (corners, bottom-center, center, or random corners), and see/reset the social-visit counter. Settings persist across restarts.
 
 ## How it works
 
 - A watcher asks Chrome for its active tab URL once a second; arriving on a watched site fires the overlay (60s cooldown). The timer fires it too.
 - Each fire sends a track + character to the overlay. The avatar slides in (idle pose first, never blank), lip-syncs via an analyser tapped ahead of the volume fade, returns to rest for a beat when the audio ends, then slides out. A faint vignette behind the figure adds presence.
 - Audio errors never strand the overlay: a failed track logs one line to `agent.log` and hides immediately. A 75s safety timer backstops everything.
+- `agent.log` tells the whole story: one `started (paused=…, voice=…, avatar=…)` line per launch, `paused`/`resumed` on every toggle, `fire: <track> as <character>` per interrupt, and a `skip: <reason>` line whenever a fire was blocked (paused, mid-call, no audio) — so a quiet app is never a mystery.
 - A small Swift helper pauses interrupts while any app uses the camera or mic.
 - A launchd LaunchAgent (`com.realitycheck.avatars`) keeps it alive and starts it at login. It is independent of the original reality-check agent: both apps can run side by side with separate settings.
 

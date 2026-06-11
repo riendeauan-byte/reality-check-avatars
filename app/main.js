@@ -191,12 +191,17 @@ function tracksFor(voice) {
   return list;
 }
 
-function fire(trackName) {
-  if (isPlaying || !overlay || settings.paused) return;
-  if (settings.pauseOnMedia && mediaActive) return; // don't disrupt a call
+// force = explicit user request (Play one now, dashboard preview, RC_TEST):
+// plays even while paused. Every skipped fire logs why — silent no-ops made
+// a paused app indistinguishable from a broken one.
+function fire(trackName, force) {
+  const skip = (why) => console.log(`skip: ${why}`);
+  if (isPlaying || !overlay) return skip(isPlaying ? "already playing" : "no overlay");
+  if (settings.paused && !force) return skip("paused");
+  if (settings.pauseOnMedia && mediaActive) return skip("camera/mic in use"); // don't disrupt a call
   let tracks = tracksFor(settings.voice);
   if (!tracks.length && settings.voice !== "all") tracks = tracksFor("all"); // stale bank pick
-  if (!tracks.length) return; // tray tooltip points the user at prep/convert_clips.sh
+  if (!tracks.length) return skip("no audio tracks — run prep/convert_clips.sh");
   isPlaying = true;
   lastFire = Date.now();
   // Random, but never repeat a track from the last NO_REPEAT fires (and so never
@@ -347,6 +352,8 @@ function pushToDash() {
 
 ipcMain.on("get-settings", (e) => e.reply("settings", settings));
 ipcMain.on("set-settings", (e, patch) => {
+  if (typeof patch.paused === "boolean" && patch.paused !== settings.paused)
+    console.log(patch.paused ? "paused" : "resumed");
   settings = { ...settings, ...patch };
   saveSettings();
   if (settings.paused && isPlaying) stopOverlay(); // pause stops it immediately
@@ -360,7 +367,7 @@ ipcMain.on("reset-count", () => {
   pushToDash();
   updateTray();
 });
-ipcMain.on("preview", () => fire());
+ipcMain.on("preview", () => fire(null, true));
 ipcMain.on("get-voices", (e) => e.reply("voices", voiceBanks()));
 
 // ---------- tray (menu bar) ----------
@@ -373,12 +380,13 @@ function updateTray() {
   if (!tray) return;
   const menu = Menu.buildFromTemplate([
     { label: "Settings…", click: openDashboard },
-    { label: "Play one now", click: () => fire() },
+    { label: "Play one now", click: () => fire(null, true) },
     { type: "separator" },
     {
       label: settings.paused ? "Resume" : "Pause",
       click: () => {
         settings.paused = !settings.paused;
+        console.log(settings.paused ? "paused" : "resumed");
         if (settings.paused && isPlaying) stopOverlay(); // stop now
         saveSettings();
         updateTray();
@@ -406,6 +414,11 @@ function createTray() {
 app.whenReady().then(() => {
   if (app.dock) app.dock.hide();
   loadSettings();
+  // One line per (re)start so agent.log always answers "was it even running,
+  // and in what state?" after the fact.
+  console.log(
+    `started (paused=${settings.paused}, voice=${settings.voice}, avatar=${settings.avatar})`
+  );
   createOverlay();
   createTray();
   startWatcher();
@@ -415,7 +428,7 @@ app.whenReady().then(() => {
   if (process.env.RC_TEST) {
     // RC_TEST=1 -> play one random track; RC_TEST=<name> -> play that track
     const name = process.env.RC_TEST === "1" ? undefined : process.env.RC_TEST;
-    setTimeout(() => fire(name), 1500);
+    setTimeout(() => fire(name, true), 1500);
   }
 });
 
